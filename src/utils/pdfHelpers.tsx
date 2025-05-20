@@ -1,36 +1,35 @@
-import { PDFDocumentProxy, PDFPageProxy, getDocument } from 'pdfjs-dist';
-import { TextChunk } from '../types';
+import * as pdfjs from 'pdfjs-dist';
 
-// Initialize PDF.js worker
-const pdfjsVersion = 'v4.0.379'; // Must match the version of pdfjs-dist
-const pdfjsWorkerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.js`;
+const pdfjsVersion = '4.0.379';
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.js`;
 
-// Ensure the worker is loaded
-const loadWorker = () => {
-  if (window['pdfjs-dist/build/pdf']) {
-    const pdfjsLib = window['pdfjs-dist/build/pdf'];
-    if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
-    }
-  }
-};
+// Define types if necessary
+interface TextChunk {
+  text: string;
+  pageIndex: number;
+  boundingBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
 
 /**
  * Load a PDF document from a URL or file
  */
-export const loadPDF = async (source: string | File): Promise<PDFDocumentProxy> => {
-  loadWorker();
-  
+export const loadPDF = async (source: string | File): Promise<pdfjs.PDFDocumentProxy> => {
   try {
     let sourceData: string | ArrayBuffer;
-    
+
     if (typeof source === 'string') {
       sourceData = source;
     } else {
       sourceData = await readFileAsArrayBuffer(source);
     }
-    
-    const pdf = await getDocument(sourceData).promise;
+
+    const loadingTask = pdfjs.getDocument(sourceData);
+    const pdf = await loadingTask.promise;
     return pdf;
   } catch (error) {
     console.error('Error loading PDF:', error);
@@ -53,10 +52,10 @@ const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
 /**
  * Extract text content from a page
  */
-export const extractTextFromPage = async (page: PDFPageProxy): Promise<TextChunk[]> => {
+export const extractTextFromPage = async (page: pdfjs.PDFPageProxy): Promise<TextChunk[]> => {
   const textContent = await page.getTextContent();
   const chunks: TextChunk[] = [];
-  
+
   textContent.items.forEach((item: any) => {
     if ('str' in item && item.str.trim()) {
       chunks.push({
@@ -71,7 +70,7 @@ export const extractTextFromPage = async (page: PDFPageProxy): Promise<TextChunk
       });
     }
   });
-  
+
   return chunks;
 };
 
@@ -79,24 +78,20 @@ export const extractTextFromPage = async (page: PDFPageProxy): Promise<TextChunk
  * Extract text from multiple pages of a PDF
  */
 export const extractTextFromPDF = async (
-  pdf: PDFDocumentProxy,
+  pdf: pdfjs.PDFDocumentProxy,
   startPage: number = 1,
   endPage?: number
 ): Promise<TextChunk[]> => {
   const maxPage = endPage || pdf.numPages;
-  const pageRange = Array.from(
-    { length: maxPage - startPage + 1 },
-    (_, i) => startPage + i
-  );
-  
+  const pageRange = Array.from({ length: maxPage - startPage + 1 }, (_, i) => startPage + i);
   const allChunks: TextChunk[] = [];
-  
+
   for (const pageNum of pageRange) {
     const page = await pdf.getPage(pageNum);
     const pageChunks = await extractTextFromPage(page);
     allChunks.push(...pageChunks);
   }
-  
+
   return allChunks;
 };
 
@@ -109,9 +104,8 @@ export const groupTextChunks = (chunks: TextChunk[], maxChunkSize: number = 200)
     text: '',
     pageIndex: chunks[0]?.pageIndex || 0,
   };
-  
+
   chunks.forEach((chunk) => {
-    // If adding this chunk would exceed max size, push current chunk and start a new one
     if (currentChunk.text.length + chunk.text.length > maxChunkSize) {
       if (currentChunk.text) {
         groupedChunks.push({ ...currentChunk });
@@ -121,18 +115,16 @@ export const groupTextChunks = (chunks: TextChunk[], maxChunkSize: number = 200)
         pageIndex: chunk.pageIndex,
       };
     } else {
-      // Add space if needed
       if (currentChunk.text && !currentChunk.text.endsWith(' ') && !chunk.text.startsWith(' ')) {
         currentChunk.text += ' ';
       }
       currentChunk.text += chunk.text;
     }
   });
-  
-  // Add the last chunk if it has content
+
   if (currentChunk.text) {
     groupedChunks.push(currentChunk);
   }
-  
+
   return groupedChunks;
 };
